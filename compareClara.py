@@ -24,10 +24,92 @@ from pyresample import geometry as prg  # @UnresolvedImport
 from pyresample.kd_tree import resample_nearest  # @UnresolvedImport
 import copy
 from scipy.ndimage.interpolation import zoom
+import time
 
 CB_colour_cycle = {'blue': '#377eb8', 'orange': '#ff7f00', 'green': '#4daf4a',
                    'pink': '#f781bf', 'brown': '#a65628', 'lila': '#984ea3',
                    'grey': '#999999', 'red': '#e41a1c', 'gul': '#dede00'}
+
+
+#: Figure variables
+def getFigVar(vn):
+    if vn == 'cfc':
+        mi_o = 0
+        ma_o = 100
+        bt_o = [0, 20, 40, 60, 80, 100]
+        cl_o = '[%]'
+        
+        mi_d = -30
+        ma_d = 30
+        bt_d = [-30, -15, 0, 15, 30]
+        cl_d = '[%%]'
+        
+    elif vn == 'cth':
+        mi_o = 0
+        ma_o = 16000
+        bt_o = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000]
+        ma_o = 10000
+        bt_o = [2000, 4000, 6000, 8000, 10000]#, 12000, 14000, 16000]
+        cl_o = '[m]'
+        
+        mi_d = -5000
+        ma_d = 5000
+        bt_d = [-5000, -2500, 0, 2500, 5000]
+        cl_d = '[m]'
+    elif vn == 'cph':
+        mi_o = 0
+        ma_o = 100
+        bt_o = [0, 20, 40, 60, 80, 100]
+        cl_o = '[%]'
+        
+        mi_d = -30
+        ma_d = 30
+        bt_d = [-30, -15, 0, 15, 30]
+        cl_d = '[%%]'
+    elif vn == 'lwp':
+        mi_o = 0
+        ma_o = 0.25
+        bt_o = [0, 0.05, 0.1, 0.15, 0.2, 0.25]
+        cl_o = '[kg/m2]'
+        
+        mi_d = -0.1
+        ma_d = mi_d * -1
+        bt_d = [-0.1, -0.05, 0, 0.05, 0.1]
+        cl_d = '[kg/m2]'
+    elif vn == 'iwp':
+        mi_o = 0
+        ma_o = 0.25
+        bt_o = [0, 0.05, 0.1, 0.15, 0.2, 0.25]
+        cl_o = '[kg/m2]'
+        
+        mi_d = -0.1
+        ma_d = mi_d * -1
+        bt_d = [-0.1, -0.05, 0, 0.05, 0.1]
+        cl_d = '[kg/m2]'
+    elif vn == 'jch':
+        mi_o = 0
+        ma_o = 100
+        bt_o = [0, 20, 40, 60, 80, 100]
+        cl_o = '[%]'
+        
+        mi_d = -20
+        ma_d = 20
+        bt_d = [-20, -10, 0, 10, 20]
+        cl_d = '[%%]'
+    else:
+        mi_o = 0
+        ma_o = 100
+        bt_o = [0, 20, 40, 60, 80, 100]
+        cl_o = '[%]'
+        
+        mi_d = -30
+        ma_d = 30
+        bt_d = [-30, -15, 0, 15, 30]
+        cl_d = '[%%]'
+        
+    retv = {'vmino': mi_o, 'vmaxo': ma_o, 'bartickso': bt_o, 'cbarlabelo': cl_o, \
+            'vmind': mi_d, 'vmaxd': ma_d, 'barticksd': bt_d, 'cbarlabeld': cl_d}
+    return retv
 
 
 def getVar(ncO, vn, geo=False, obtv=None):
@@ -44,10 +126,15 @@ def getVar(ncO, vn, geo=False, obtv=None):
         latm = ncO.variables['lat'][:]
         lonm = ncO.variables['lon'][:]
         retv.update({'time': time, 'lat': lat, 'lon': lon, 'latm': latm, 'lonm': lonm})
-    if vn not in retv.keys():
-        #: Do not add variables that are already in added. Ex lat if geo is True
-        v = np.where(ncO.variables[vn][:].mask, np.nan, ncO.variables[vn][:].data)
-        vm = ncO.variables[vn][:]
+    if vn == 'jch':
+        vnr = 'cfc'
+    else:
+        vnr = vn
+    if vnr not in retv.keys():
+        #: Do not add variables that are already added. Ex lat if geo is True
+#         pdb.set_trace()
+        v = np.where(ncO.variables[vnr][:].mask, np.nan, ncO.variables[vnr][:].data)
+        vm = ncO.variables[vnr][:]
         retv.update({vn: v, (vn + 'm'): vm})
     return retv
 
@@ -67,8 +154,10 @@ if __name__ == '__main__':
                   201001, 201007, 201101, 201107, 201601, 201607]
     
     #: 'CFCmm', 'CTOmm', 'CPHmm', 'LWPmm', 'IWPmm', 'JCHmh'
-    typ = 'CFCmm'
+    typ = 'JCHmh'
     var = typ[0:3].lower()
+    if var == 'cto':
+        var = 'cth'
     for area in ['GL', 'NP', 'SP']:
         cfc3mean = []
         cfc2mean = []
@@ -76,24 +165,28 @@ if __name__ == '__main__':
         for ym in yearmonths:
             year = int(str(ym)[0:4])
             mon = int(str(ym)[4:])
-            if (area in ['NP', 'SP']) and (typ in ['CPHmm', 'LWPmm', 'IWPmm', 'JCHmh']):
+            if (area in ['NP', 'SP']) and (typ in ['CTOmm', 'CPHmm', 'LWPmm', 'IWPmm', 'JCHmh']):
                 continue
             if (area in ['NP', 'SP']) and (year == 2016):
                 continue
+            if (var == 'jch') and (year == 2016):
+                continue
             if year < 1982:
                 continue
-            elif year in [2016]:
+            if year in [2016]:
                 c2d = '%s/*/AVPOS/%d' %(mainClaraA21Dir, year)
             else:
                 c2d = '%s/%d/%02d/nc/AVPOS_%d_GAC_V002_L3' %(mainClaraA2Dir, year, mon, ym)
             print(ym)
             ym_d.append(datetime.datetime(year=year, month=mon, day=1))
-        
             c3d = '%s/%d/AVPOS_%d_CLARA3_Level3_V011' %(mainClaraA3Dir, ym, ym)
-        
-            fn3 = glob.glob('%s/%s%d*%s.nc' %(c3d, typ, ym, area))[0]
-            fn2 = glob.glob('%s/%s%d*%s.nc' %(c2d, typ, ym, area))[0]
             
+            try:
+                fn3 = glob.glob('%s/%s%d*%s.nc' %(c3d, typ, ym, area))[0]
+                fn2 = glob.glob('%s/%s%d*%s.nc' %(c2d, typ, ym, area))[0]
+            except:
+                print('Cant find files')
+                pdb.set_trace()
             nc3 = netCDF4.Dataset(fn3)
             nc2 = netCDF4.Dataset(fn2)
             val3 = getVar(nc3, var, geo=True)
@@ -101,11 +194,6 @@ if __name__ == '__main__':
             nc3.close()
             nc2.close()
 
-            
-            
-            cfc3mean.append(np.nanmean(val3[var]))
-            cfc2mean.append(np.nanmean(val2[var]))
-            
             if (ym in [198301, 201107]):
                 #: The data is in lon/lat therefore use PlateCarree?
                 img_proj = ccrs.PlateCarree()
@@ -143,10 +231,9 @@ if __name__ == '__main__':
                 datad = (data3 - data2)
                 
                 #: Create colormap with nan's not visible
-                my_cmap = copy.copy(matplotlib.cm.BrBG)
+                my_cmap = copy.copy(matplotlib.cm.cividis_r)
                 my_cmap.set_bad('1.0', alpha=0)
-                my_cmap.set_over('red', alpha=1)
-                
+#                 my_cmap.set_over('red', alpha=1)                
 
                 #: Define area from cartopy to get globe boarders
                 crs = projection
@@ -185,29 +272,31 @@ if __name__ == '__main__':
                 resultd.data[:,0:xshape//2][lon[:,0:xshape//2]>0] = np.nan
                 resultd.data[:,xshape//2:][lon[:,xshape//2:]<0] = np.nan
                 
+                fv = getFigVar(var)
+                
                 fig = plt.figure(figsize=fs)
                 fig.suptitle('%s %d-%02d' %(var.upper(), year, mon))
                 ax = fig.add_subplot(3,1,1, projection=crs)
-                im = ax.imshow(result3, transform=crs, extent=crs.bounds, cmap=my_cmap, vmin=0, vmax=100)
+                im = ax.imshow(result3, transform=crs, extent=crs.bounds, cmap=my_cmap, vmin=fv['vmino'], vmax=fv['vmaxo'])
                 ax.coastlines()
-                barticks = [0, 20, 40, 60, 80, 100]
-                cbar = fig.colorbar(im, ticks=barticks)
-                cbar.set_label('[%]', rotation=0)
+                cbar = fig.colorbar(im, ticks=fv['bartickso'])
+                cbar.set_label(fv['cbarlabelo'], rotation=90)
                 ax.set_title('CLARA3')
                 
                 ax = fig.add_subplot(3,1,2, projection=crs)
-                im = ax.imshow(result2, transform=crs, cmap=my_cmap, extent=crs.bounds, vmin=0, vmax=100)
+                im = ax.imshow(result2, transform=crs, cmap=my_cmap, extent=crs.bounds, vmin=fv['vmino'], vmax=fv['vmaxo'])
                 ax.coastlines()
-                barticks = [0, 20, 40, 60, 80, 100]
-                cbar = fig.colorbar(im, ticks=barticks)
-                cbar.set_label('[%]', rotation=0)
+                cbar = fig.colorbar(im, ticks=fv['bartickso'])
+                cbar.set_label(fv['cbarlabelo'], rotation=90)
                 ax.set_title('CLARA2')
                 
+#                 vminmaxd = 90
+#                 barticksd = [-90, -60, -30, 0, 30, 60, 90]
                 ax = fig.add_subplot(3,1,3, projection=crs)
-                im = ax.imshow(resultd, transform=crs, extent=crs.bounds, cmap='RdBu_r', vmin=-90, vmax=90)
+                im = ax.imshow(resultd, transform=crs, extent=crs.bounds, cmap='RdBu_r', vmin=fv['vmind'], vmax=fv['vmaxd'])
                 ax.coastlines()
-                barticks = [-90, -60, -30, 0, 30, 60, 90]
-                cbar = fig.colorbar(im, ticks=barticks)
+                cbar = fig.colorbar(im, ticks=fv['barticksd'])
+                cbar.set_label(fv['cbarlabeld'], rotation=90)
                 ax.set_title('A3 - A2')
                 
                 figname = '%s/%s_%s_map_%d-%02d' %(plotDir, var, area, year,mon)
@@ -216,10 +305,11 @@ if __name__ == '__main__':
                 fig.savefig(figname + '.png')
                 
 
-                
-
-    
-    
+            cfc3mean.append(np.nanmean(val3[var]))
+            cfc2mean.append(np.nanmean(val2[var]))
+        
+        if len(cfc3mean) == 0:
+            continue
         fig = plt.figure()
         ax = fig.add_subplot(1,1,1)
         ax.plot(ym_d, cfc3mean, color=CB_colour_cycle['red'], label='A3')
@@ -229,9 +319,9 @@ if __name__ == '__main__':
     #     for i, txt in enumerate(proc):
     #         ax.annotate(txt, (cfc3Gmean[i], ym_d[i]))
         ax.text(0.5, 0.9, 'Mean increase = %0.2f%%' %procmean, horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
-    
-    
-    
+     
+     
+     
         fig.autofmt_xdate()
         ax.set_xlabel('Date')
         ax.set_ylabel('%s Mean %s' %(area, var.upper()))
@@ -239,8 +329,8 @@ if __name__ == '__main__':
         fig.tight_layout()
         figname = '%s/%s_%s_mean' %(plotDir, var, area)
         fig.show()
-        fig.savefig(figname + '.png')  
-        pdb.set_trace()
+        fig.savefig(figname + '.png')
+    pdb.set_trace()
     
     
     

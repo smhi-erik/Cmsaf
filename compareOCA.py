@@ -396,6 +396,42 @@ def resampleProjection(dlon, dlat, slon, slat, swath_data):
     return result
 
 
+def addExtent(obt, typ, lon1d, lon2d):
+#: Add lon extent to make sure it gets the same size as the other two
+    if obt.ndim == 1:
+        retv = np.zeros(lon1d.shape)
+    else:
+        retv = np.zeros(lon2d.shape)
+    
+    if typ == 'lon':
+        if obt.ndim == 1:
+            #: Add before
+            #: Add -180 - -90  by adding 90 on first part
+            retv[0:90] = obt[0:90] - 90
+            #: Add middle
+            #: Add -90 - 90
+            #: Same as org data
+            retv[90:270] = obt
+            #: Add After
+            #: Add 90 - 180 by adding 90 onlast part
+            retv[270:360] = obt[90:] + 90
+        else:
+            #: Same but for 2D
+            retv[:, 0:90] = obt[:, 0:90] - 90
+            retv[:, 90:270] = obt
+            retv[:, 270:360] = obt[:, 90:] + 90
+    elif typ == 'lat':
+        #: Lat is same in this axes so just add the same row to all
+        retv[:, 0:90] = obt[:, 0:90]
+        retv[:, 90:270] = obt
+        retv[:, 270:360] = obt[:, 90:]
+    elif typ == 'data':
+        #: No data except org
+        #: Everything before and anfter org should be nan
+        retv = retv + np.nan
+        #: Middle is same as org
+        retv[:, 90:270] = obt
+    return retv
 
 if __name__ == '__main__':
     
@@ -434,10 +470,10 @@ if __name__ == '__main__':
     
     
     gewexMainDir = '/nobackup/smhid19/proj/foua/data/satellite/calipso_monthly_mean_GEWEX/h5_converted'
-    plotDir = 'Plots/Compare_OCA/Test'
+    plotDir = 'Plots/Compare_OCA'
     tempfiles = '/TempFiles/OCAMean'
     if args.year == 0:
-        years = range(2004,2021)
+        years = range(2004,2020)
     else:
         years = [args.year]
     if args.month == 0:
@@ -454,7 +490,17 @@ if __name__ == '__main__':
     lonremap = np.asarray([*range(-180, 180)]) + 0.5
     latremap = np.asarray([*range(-90, 90)]) + 0.5
     lonremap_mesh, latremap_mesh = np.meshgrid(lonremap, latremap)
-    
+    if use_opt in [10, 11, 12, 13]:
+        #: hard coded from OCA 2019-08
+        maxLon = 81.20243072509766
+        minLon = -81.20243072509766
+        maxLat = 81.26285552978516
+        minLat = -81.26285552978516
+    elif use_opt in [20, 21, 22, 23]:
+        maxLon = 50
+        minLon = -50
+        maxLat = 50
+        minLat = -50
     yearmonths = []
     msgNums = []
     plotMaps_done = False
@@ -472,55 +518,71 @@ if __name__ == '__main__':
     i = -1
     for year in years:
         for mon in months:
+            #: No OCA data after 2019-08
+            if ((year == 2019) and (mon > 8)) or (year > 2019):
+                break
             i = i + 1
             print('%d-%02d' %(year, mon))
             yearmonths.append('%d-%02d' %(year, mon))
             
-            if mon in [6]:
+            #: Labels used for plotting time series
+            if (len(years) == 1) or ((len(years) >= 1) and (mon in [6])):
                 plot_x_labels.append('%d-%02d' %(year, mon))
-                #: TODO: Check if plot inds start at 0 or 1
                 plot_x_ticks.append(i + 1)
+            #: Year / mont that is plotted on a map
             if (year == 2010) and (mon == 12):
+#             if (year == 2005) and (mon == 3):
                 plotMaps = True
             else:
                 plotMaps = False
+            #: Dirs
             cfcclasDir = '%s/cfc/%d/%02d' %(clasMainDir, year, mon)
             ctoclasDir = '%s/cto/%d/%02d' %(clasMainDir, year, mon)
-    #         ocaDir = '%s/%d/%02d/%02d' %(ocaMainDir, year, mon, day)
             gewexDir = '%s/%d' %(gewexMainDir, year)
         
-
+            
+            #: Read data
             #: OCA
-            # msgn = getMSGNum(year, mon)
-            # if msgn == 0:
-            #     print('No OCA data for this month')
-            #     sys.exit()
-            #     ocaMainDir = '%s/%s' %(ocaMainDir_msg, msg)
-            #     ocaDir = '%s/%d/%02d' %(ocaMainDir, year, mon)
             olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, args.om) #: Pa
-            
-            lonremap = np.asarray([*range(-180, 180)]) + 0.5
-            latremap = np.asarray([*range(-90, 90)]) + 0.5
-            lonremap_mesh, latremap_mesh = np.meshgrid(lonremap, latremap)
-            
-            if use_opt in [10, 11, 12, 13]:
-                #: hard coded from OCA 2019-08
-                maxLon = 81.20243072509766
-                minLon = -81.20243072509766
-                maxLat = 81.26285552978516
-                minLat = -81.26285552978516
-            elif use_opt in [20, 21, 22, 23]:
-                maxLon = 50
-                minLon = -50
-                maxLat = 50
-                minLat = -50
-            
+            #: Controle if the data existed for the particular month
             if (not isinstance(olat, np.ndarray)) and np.isnan(olat):
-                oca_ctp[i] = np.nan
-                oca_cfc[i] = np.nan
+                no_oca_data = True
+            else:
+                no_oca_data = False
+            #: Clas
+            cfcClasname = glob.glob('%s/CFCmm*.nc' %cfcclasDir)[0] #: md = Diurnal cycle, mm = monthly mean
+            ctoClasname = glob.glob('%s/CTOmm*.nc' %ctoclasDir)[0] #: md = Diurnal cycle, mm = monthly mean, mh = ?
+            cfclat, cfclon, cfctime, cfc_var, cfclat_b, cfclon_b, cfctime_b = readClas(cfcClasname, 'cfc')
+            ctolat, ctolon, ctotime, ctp_var, ctolat_b, ctolon_b, ctotime_b = readClas(ctoClasname, 'cto') #: hPa
+            #: Controle if the data existed for the particular month
+            if np.all(ctp_var[0] == 0) or ((not isinstance(cfclat, np.ndarray)) and np.isnan(cfclat)):
+                no_clas_data = True
+            else:
+                no_clas_data = False
+            #: Gewax
+            gewexname = '%s/CAL_LID_L3_GEWEX_Cloud-Standard-V1-00.%i-%02dA.h5' %(gewexDir, year, mon)
+            glat, glon, gctp, gcft = readGewax(gewexname) #: hPa
+            #: Controle if the data existed for the particular month
+            if (not isinstance(glat, np.ndarray)) and np.isnan(glat):
+                no_gewex_data = True
+            else:
+                no_gewex_data = False
+            #: OCA
+            #: Clas
+            #: Gewax
+            
+            #: Remapp OCA and CLAS
+            #: OCA
+            if no_oca_data:
 #                 oca_cprob50[i] = np.nan
                 msgNums.append(np.nan)
-                #: hard coded from OCA 2019-08
+                #: Create a map where there is OCA Data
+                #: Only used when remapp
+                #: This is a dummy, all true to not create conflicts
+                if use_opt in [12, 13, 22, 23]:
+                    oca_true_cfc = np.ones(lonremap_mesh.shape).astype('bool')
+                    oca_true_ctp = np.ones(lonremap_mesh.shape).astype('bool')
+                    oca_ind_latlon = np.ones(lonremap_mesh.shape).astype('bool')
             else:
                 #: OCA Lon starts from high to the left and get smaller
                 #: Other data do opposite 
@@ -529,106 +591,172 @@ if __name__ == '__main__':
                 olon = olon[:, ::-1]
                 octp = octp[:, ::-1]
                 ocfc = ocfc[:, ::-1]
-#                 ocprob_m = ocprob_m[:, ::-1]
-                if use_opt in [10, 11, 20, 21]:
-                    ocfc = ocfc * 100 #: Procent
-                    octp = octp / 100. #: Change to hPa
-                elif use_opt in [12, 13, 22, 23]:
-                    ocfc_masked = resampleProjection(lonremap_mesh, latremap_mesh, olon, olat, ocfc * 100)
-                    octp_masked = resampleProjection(lonremap_mesh, latremap_mesh, olon, olat, octp / 100.)
+                ocfc = ocfc * 100 #: Procent
+                octp = octp / 100. #: Change to hPa
+                if use_opt in [12, 13, 22, 23]:
+                    #: Remapp
+                    ocfc_masked = resampleProjection(lonremap_mesh, latremap_mesh, olon, olat, ocfc)
+                    octp_masked = resampleProjection(lonremap_mesh, latremap_mesh, olon, olat, octp)
+                    #: Remove mask
                     ocfc =  np.where(ocfc_masked.mask, np.nan, ocfc_masked.data)
                     octp =  np.where(octp_masked.mask, np.nan, octp_masked.data)
-                    
+                    #: Use remapp lon/lat
                     olon = lonremap_mesh
                     olat = latremap_mesh
+                #: What satellite (MSG) the OCA is from
                 msgNums.append(oextra['MSG Name'])
-                #: OCA
-#                 maxLon = np.nanmax(olon)
-#                 minLon = np.nanmin(olon)
-#                 maxLat = np.nanmax(olat)
-#                 minLat = np.nanmin(olat)
-                ocaInd = (olon <= maxLon) & (olon >= minLon) & (olat <= maxLat) & (olat >= minLat)
-#                 oca_nanind = ~np.isnan(ocprob_m)
-                if use_opt in [10, 20, 12, 22]:
-                    oca_ctp[i] = np.nanmean(octp[ocaInd])
-                    oca_cfc[i] = np.nanmean(ocfc[ocaInd])
-                elif use_opt in [11, 21, 13, 23]:
-                    oca_ctp[i] = np.nanmean(np.where(~np.isnan(octp), octp * np.cos(np.deg2rad(olat)), np.nan)[ocaInd])
-                    oca_cfc[i] = np.nanmean(np.where(~np.isnan(ocfc), ocfc * np.cos(np.deg2rad(olat)), np.nan)[ocaInd])
-#                 oca_cprob50[i] = (ocprob_m[oca_nanind]>50).sum() / oca_nanind.sum()
-
+                #: OCA Data
+                oca_true_cfc = ~np.isnan(ocfc)
+                oca_true_ctp = ~np.isnan(octp)
+                #: OCA Lat/Lon
+                oca_ind_latlon = (olon <= maxLon) & (olon >= minLon) & (olat <= maxLat) & (olat >= minLat)
+                
             #: Clas
-            cfcClasname = glob.glob('%s/CFCmm*.nc' %cfcclasDir)[0] #: md = Diurnal cycle, mm = monthly mean
-            ctoClasname = glob.glob('%s/CTOmm*.nc' %ctoclasDir)[0] #: md = Diurnal cycle, mm = monthly mean, mh = ?
-            cfclat, cfclon, cfctime, cfc_var, cfclat_b, cfclon_b, cfctime_b = readClas(cfcClasname, 'cfc')
-            ctolat, ctolon, ctotime, ctp_var, ctolat_b, ctolon_b, ctotime_b = readClas(ctoClasname, 'cto') #: hPa
-            if np.all(ctp_var[0] == 0) or ((not isinstance(cfclat, np.ndarray)) and np.isnan(cfclat)):
-                clas_ctp[i] = np.nan
-                clas_cfc[i] = np.nan
-#                 clas_cprob50[i] = np.nan
+            if no_clas_data:
+                if use_opt in [12, 13, 22, 23]:
+                    clas_true_cfc = np.ones(lonremap_mesh.shape).astype('bool')
+                    clas_true_ctp = np.ones(lonremap_mesh.shape).astype('bool')
+                    clas_ind_latlon = np.ones(lonremap_mesh.shape).astype('bool')
             else:
-                ctolon_mesh, ctolat_mesh = np.meshgrid(ctolon, ctolat)
-                if use_opt in [10, 11, 20, 21]:
-                    c_ctp = ctp_var[0][0]
-                    c_cfc = cfc_var[0][0]
-                elif use_opt in [12, 13, 22, 23]:
-#                     c_ctp = resampleProjection(lonremap_mesh, latremap_mesh, ctolon_mesh, ctolat_mesh, ctp_var[0][0])
-#                     c_cfc = resampleProjection(lonremap_mesh, latremap_mesh, ctolon_mesh, ctolat_mesh, cfc_var[0][0])
-#                     ctolon = lonremap
-#                     ctolat = latremap
-#                     ctolon_mesh = lonremap_mesh
-#                     ctolat_mesh = latremap_mesh
-                    c_ctp = ctp_var[0][0][10::20, 10::20]
-                    c_cfc = cfc_var[0][0][10::20, 10::20]
-                    ctolon = ctolon[10::20]
-                    ctolat = ctolat[10::20]
-                    ctolon_mesh = ctolon_mesh[10::20, 10::20]
-                    ctolat_mesh = ctolat_mesh[10::20, 10::20]
-#                 c_cprob = cfc_var[1]
                 #: TODO: Right order?Update. I think it is
                 #: It wasent I think
-                #: Clas
-                clasInd = (ctolon_mesh <= maxLon) & (ctolon_mesh >= minLon) & (ctolat_mesh <= maxLat) & (ctolat_mesh >= minLat)
-                if use_opt in [10, 20, 12, 22]:
-                    clas_ctp[i] = np.nanmean(c_ctp[clasInd])
-                    clas_cfc[i] = np.nanmean(c_cfc[clasInd])
-                elif use_opt in [11, 21, 13, 23]:
-                    clas_ctp[i] = np.nanmean(np.where(~np.isnan(c_ctp), c_ctp *  np.cos(np.deg2rad(ctolat_mesh)), np.nan)[clasInd])
-                    clas_cfc[i] = np.nanmean(np.where(~np.isnan(c_cfc), c_cfc *  np.cos(np.deg2rad(ctolat_mesh)), np.nan)[clasInd])
-#                 clas_cprob50[i] = (c_cprob[clas_nanind]>50).sum() / clas_nanind.sum()
+                clon_mesh, clat_mesh = np.meshgrid(ctolon, ctolat)
+                cctp = ctp_var[0][0]
+                ccfc = cfc_var[0][0]
+                if use_opt in [12, 13, 22, 23]:
+                    #: No remapp just pick every 20th, start 10 in
+                    cctp = cctp[10::20, 10::20]
+                    ccfc = ccfc[10::20, 10::20]
+                    ctolon = ctolon[10::20]
+                    ctolat = ctolat[10::20]
+                    clon_mesh = clon_mesh[10::20, 10::20]
+                    clat_mesh = clat_mesh[10::20, 10::20]
+                    
+                    #: Needs to be same extent
+                    ctolon = addExtent(ctolon, 'lon', lonremap, lonremap_mesh)
+                    clon_mesh = addExtent(clon_mesh, 'lon', lonremap, lonremap_mesh)
+                    clat_mesh = addExtent(clat_mesh, 'lat', lonremap, lonremap_mesh)
+                    cctp = addExtent(cctp, 'data', lonremap, lonremap_mesh)
+                    ccfc = addExtent(ccfc, 'data', lonremap, lonremap_mesh)
+
+                    
+                clas_true_cfc = ~np.isnan(ccfc)
+                clas_true_ctp = ~np.isnan(cctp)
+                clas_ind_latlon = (clon_mesh <= maxLon) & (clon_mesh >= minLon) & (clat_mesh <= maxLat) & (clat_mesh >= minLat)
             
+            #: Gewex no remapp but needs to been taken care of
+            if no_gewex_data:
+                if use_opt in [12, 13, 22, 23]:
+                    gewex_true_cfc = np.ones(lonremap_mesh.shape).astype('bool')
+                    gewex_true_ctp = np.ones(lonremap_mesh.shape).astype('bool')
+                    gewex_ind_latlon = np.ones(lonremap_mesh.shape).astype('bool')
+            else:
+                #: Procent
+                #: #: gcft is gcfc for top layer
+                gcfc = gcft * 100.
+                gewex_true_cfc = ~np.isnan(gcfc)
+                gewex_true_ctp = ~np.isnan(gctp)
+                glon_mesh, glat_mesh = np.meshgrid(glon, glat)
+                gewex_ind_latlon = (glon_mesh <= maxLon) & (glon_mesh >= minLon) & (glat_mesh <= maxLat) & (glat_mesh >= minLat)
+            
+            
+            #: Create Inds
+            
+            if [12, 13, 22, 23]:
+                true_cfc = oca_true_cfc & clas_true_cfc & gewex_true_cfc
+                true_ctp = oca_true_ctp & clas_true_ctp & gewex_true_ctp
+                ind_latlon = oca_ind_latlon & clas_ind_latlon & gewex_ind_latlon
+                
+                ocaIndcfc = true_cfc & ind_latlon
+                ocaIndctp = true_ctp & ind_latlon
+                clasIndcfc = true_cfc & ind_latlon
+                clasIndctp = true_ctp & ind_latlon
+                gewexIndcfc = true_cfc & ind_latlon
+                gewexIndctp = true_ctp & ind_latlon
+            else:
+                if not no_oca_data:
+                    ocaIndcfc = oca_ind_latlon
+                    ocaIndctp = oca_ind_latlon
+                if not no_clas_data:
+                    clasIndcfc = clas_ind_latlon
+                    clasIndctp = true_ctp & ind_latlon
+                if not no_gewex_data:
+                    gewexIndcfc = true_cfc & ind_latlon
+                    gewexIndctp = true_ctp & ind_latlon
+                
+            #: Calculate mean
+            #: OCA
+            if not no_oca_data:
+                if use_opt in [10, 20, 12, 22]:
+                    oca_ctp[i] = np.nanmean(octp[ocaIndctp])
+                    oca_cfc[i] = np.nanmean(ocfc[ocaIndcfc])
+                elif use_opt in [11, 21, 13, 23]:
+                    oca_ctp[i] = np.nanmean(np.where(~np.isnan(octp), octp * np.cos(np.deg2rad(olat)), np.nan)[ocaIndctp])
+                    oca_cfc[i] = np.nanmean(np.where(~np.isnan(ocfc), ocfc * np.cos(np.deg2rad(olat)), np.nan)[ocaIndcfc])
+            else:
+                oca_ctp[i] = np.nan
+                oca_cfc[i] = np.nan
+            #: Clas
+            if not no_clas_data:
+                if use_opt in [10, 20, 12, 22]:
+                    clas_ctp[i] = np.nanmean(cctp[clasIndctp])
+                    clas_cfc[i] = np.nanmean(ccfc[clasIndcfc])
+                elif use_opt in [11, 21, 13, 23]:
+                    clas_ctp[i] = np.nanmean(np.where(~np.isnan(cctp), cctp *  np.cos(np.deg2rad(clat_mesh)), np.nan)[clasIndctp])
+                    clas_cfc[i] = np.nanmean(np.where(~np.isnan(ccfc), ccfc *  np.cos(np.deg2rad(clat_mesh)), np.nan)[clasIndcfc])
+#                 clas_cprob50[i] = (c_cprob[clas_nanind]>50).sum() / clas_nanind.sum()
+            else:
+                clas_ctp[i] = np.nan
+                clas_cfc[i] = np.nan
             #: Gewax
-            gewexname = '%s/CAL_LID_L3_GEWEX_Cloud-Standard-V1-00.%i-%02dA.h5' %(gewexDir, year, mon)
-            glat, glon, gctp, gcft = readGewax(gewexname) #: hPa
-            if (not isinstance(glat, np.ndarray)) and np.isnan(glat):
+            if not no_gewex_data:
+                if use_opt in [10, 20, 12, 22]:
+                    gewex_ctp[i] = np.nanmean(gctp[gewexIndctp])
+                    gewex_cfc[i] = np.nanmean(gcfc[gewexIndcfc])
+                elif use_opt in [11, 21, 13, 23]:
+                    gewex_ctp[i] = np.nanmean(np.where(~np.isnan(gctp),  gctp *  np.cos(np.deg2rad(glat_mesh)), np.nan)[gewexIndctp])
+                    gewex_cfc[i] = np.nanmean(np.where(~np.isnan(gcfc),  gcfc *  np.cos(np.deg2rad(glat_mesh)), np.nan)[gewexIndcfc])
+            else:
                 gewex_ctp[i] = np.nan
                 gewex_cfc[i] = np.nan
-            else:
-                glon_mesh, glat_mesh = np.meshgrid(glon, glat)
-                #: gewex
-                gewexInd = (glon_mesh <= maxLon) & (glon_mesh >= minLon) & (glat_mesh <= maxLat) & (glat_mesh >= minLat)
-                gcft = gcft * 100.
-                if use_opt in [10, 20, 12, 22]:
-                    gewex_ctp[i] = np.nanmean(gctp[gewexInd])
-                    gewex_cfc[i] = np.nanmean(gcft[gewexInd])
-                elif use_opt in [11, 21, 13, 23]:
-                    gewex_ctp[i] = np.nanmean(np.where(~np.isnan(gctp),  gctp *  np.cos(np.deg2rad(glat_mesh)), np.nan)[gewexInd])
-                    gewex_cfc[i] = np.nanmean(np.where(~np.isnan(gcft),  gcft *  np.cos(np.deg2rad(glat_mesh)), np.nan)[gewexInd])
-            
-            
-            
-            
-            
             if plotMaps:
-                ocaMap_ctp = np.where(ocaInd, octp, np.nan)
-                ocaMap_cfc = np.where(ocaInd, ocfc, np.nan)
-                ocaExtent = (np.nanmax(olon), np.nanmin(olon), np.nanmax(olat), np.nanmin(olat))
-                claasMap_ctp = np.where(clasInd, c_ctp, np.nan)
-                claasMap_cfc = np.where(clasInd, c_cfc, np.nan)
-                claasExtent = (np.nanmax(ctolon), np.nanmin(ctolon), np.nanmax(ctolat), np.nanmin(ctolat))
-                gewexMap_ctp = np.where(gewexInd, gctp, np.nan)
-                gewexMap_cfc = np.where(gewexInd, gcft, np.nan)
-                gewexExtent = (np.nanmax(glon), np.nanmin(glon), np.nanmax(glat), np.nanmin(glat))
+#                 ocaMap_ctp = np.where(oca_ind_latlon, octp, np.nan)
+#                 ocaMap_cfc = np.where(oca_ind_latlon, ocfc, np.nan)
+#                 ocaExtent = (np.nanmax(olon), np.nanmin(olon), np.nanmax(olat), np.nanmin(olat))
+#                 claasMap_ctp = np.where(clas_ind_latlon, cctp, np.nan)
+#                 claasMap_cfc = np.where(clas_ind_latlon, ccfc, np.nan)
+#                 claasExtent = (np.nanmax(ctolon), np.nanmin(ctolon), np.nanmax(ctolat), np.nanmin(ctolat))
+#                 gewexMap_ctp = np.where(gewex_ind_latlon, gctp, np.nan)
+#                 gewexMap_cfc = np.where(gewex_ind_latlon, gcfc, np.nan)
+#                 gewexExtent = (np.nanmax(glon), np.nanmin(glon), np.nanmax(glat), np.nanmin(glat))
+                if no_oca_data:
+                    ocaMap_ctp = np.zeros(lonremap_mesh.shape) + np.nan
+                    ocaMap_cfc = np.zeros(lonremap_mesh.shape) + np.nan
+                    ocaExtent = (minLon, maxLon, minLat, maxLat)
+                else:
+                    ocaMap_ctp = np.where(ocaIndctp, octp, np.nan)
+                    ocaMap_cfc = np.where(ocaIndcfc, ocfc, np.nan)
+#                     ocaExtent = (np.nanmax(olon), np.nanmin(olon), np.nanmax(olat), np.nanmin(olat))
+                    ocaExtent = (np.nanmin(olon), np.nanmax(olon), np.nanmin(olat), np.nanmax(olat))
+                #: The real max LON/LAT can be obtain by
+                #: np.max(lonremap_mesh[~np.isnan(ocaMap_ctp)])
+                if no_clas_data:
+                    claasMap_ctp = np.zeros(lonremap_mesh.shape) + np.nan
+                    claasMap_cfc = np.zeros(lonremap_mesh.shape) + np.nan
+                    claasExtent = (minLon, maxLon, minLat, maxLat)
+                else:
+                    claasMap_ctp = np.where(clasIndctp, cctp, np.nan)
+                    claasMap_cfc = np.where(clasIndcfc, ccfc, np.nan)
+                    claasExtent = (np.nanmin(ctolon), np.nanmax(ctolon), np.nanmin(ctolat), np.nanmax(ctolat))
+                
+                if no_gewex_data:
+                    gewexMap_ctp = np.zeros(lonremap_mesh.shape) + np.nan
+                    gewexMap_cfc = np.zeros(lonremap_mesh.shape) + np.nan
+                    gewexExtent = (minLon, maxLon, minLat, maxLat)
+                else:
+                    gewexMap_ctp = np.where(gewexIndctp, gctp, np.nan)
+                    gewexMap_cfc = np.where(gewexIndcfc, gcfc, np.nan)
+                    gewexExtent = (np.nanmin(glon), np.nanmax(glon), np.nanmin(glat), np.nanmax(glat))
                 plotMaps_done = True
 #     class cartopy.crs.Orthographic(central_longitude=0.0, central_latitude=0.0, globe=None)[source]
 # 
@@ -638,13 +766,12 @@ if __name__ == '__main__':
 #     octp_use = []
 #     cctp_use = []
 #     for i in range(olon.shape[0]-1):
-    
-    oca_ctp_plot = oca_ctp
-    clas_ctp_plot = clas_ctp
-    gewex_ctp_plot = gewex_ctp
-    oca_cfc_plot = oca_cfc
-    clas_cfc_plot = clas_cfc
-    gewex_cfc_plot = gewex_cfc
+    oca_ctp_plot = oca_ctp[0:i+1]
+    clas_ctp_plot = clas_ctp[0:i+1]
+    gewex_ctp_plot = gewex_ctp[0:i+1]
+    oca_cfc_plot = oca_cfc[0:i+1]
+    clas_cfc_plot = clas_cfc[0:i+1]
+    gewex_cfc_plot = gewex_cfc[0:i+1]
     msg_colour = {1: 'g', 2: 'olivedrab', 3: 'lime', 4: 'darkgreen', 12: 'r', 13: 'violet', 23: 'hotpink', 34: 'darkviolet'}
     plot_x = [*range(1, len(clas_ctp_plot) + 1)]
     if args.year == 0:
@@ -662,6 +789,9 @@ if __name__ == '__main__':
         title_extra = title_extra + ', Resample = False'
     elif use_opt in [12, 13, 22, 23]:
         title_extra = title_extra + ', Resample = True'
+    
+    if use_opt in [12, 22]:
+        title_extra = '\n Area = +-%d, Resample = True' %(int(np.nanmax(olon[ocaIndctp]) + 0.5))
         
     #: Only plot time series if there are enough months
     if len(months) >= 12:
@@ -709,14 +839,12 @@ if __name__ == '__main__':
     #             pdb.set_trace()
     #     plot_y_oca = np.where(msgNums == s, oca_ctp, np.nan)
     #===========================================================================
-            
         ax.set_xlabel('Month')
-    #     ax.set_xticks([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
-    #     ax.set_xticklabels(['2010-01', '2010-02', '2010-03', '2010-04', '2010-05', '2010-06', '2010-07', '2010-08', '2010-09', '2010-10', '2010-11', '2010-12'])
         ax.set_xticks(plot_x_ticks)
         ax.set_xticklabels(plot_x_labels)
         ax.set_ylim(ax.get_ylim()[::-1])
         ax.set_ylabel('Cloud Top Pressure [hPa]')
+        ax.set_ylim([700, 400])
         ax.legend(fontsize=8, bbox_to_anchor=(1.02, 1))
         ax.set_title('Monthly Mean Cloud Top Pressure' + title_extra)
         fig.autofmt_xdate()
@@ -753,7 +881,7 @@ if __name__ == '__main__':
         ax.set_xticklabels(plot_x_labels)
     #     ax.set_ylim(ax.get_ylim()[::-1])
         ax.set_ylabel('Cloud Fraction [%]')
-        ax.set_ylim([40, 75])
+        ax.set_ylim([45, 75])
         ax.legend(fontsize=8, bbox_to_anchor=(1.02, 1))
     
         ax.set_title('Monthly Mean Cloud Fraction' + title_extra)
@@ -789,7 +917,7 @@ if __name__ == '__main__':
         fig = plt.figure()
         ax = fig.add_subplot(111,projection=ccrs.Orthographic())
     #     ax.gridlines()
-        im = ax.imshow(ocaMap_ctp[:,::-1], extent = ocaExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
+        im = ax.imshow(ocaMap_ctp, origin='lower', extent = ocaExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
 #         im = ax.imshow(ocaMap_ctp, origin ='lower', extent = ocaExtent, transform=oca_proj, vmin=100, vmax=1000)#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
         ax.set_title('OCA, %d-%02d' %(year, mon) + title_extra)
@@ -803,7 +931,7 @@ if __name__ == '__main__':
         fig = plt.figure()
         ax = fig.add_subplot(111,projection=ccrs.Orthographic())
     #     ax.gridlines()
-        im = ax.imshow(claasMap_ctp[:,::-1], extent = claasExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
+        im = ax.imshow(claasMap_ctp, origin='lower', extent = claasExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
         ax.set_title('CLAAS, %d-%02d' %(year, mon) + title_extra)
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
@@ -812,21 +940,22 @@ if __name__ == '__main__':
         fig.savefig(figname +'.png')
         print(figname)
         
-        plt.figure(figsize=(3, 3))
-        fig = plt.figure()
-        ax = fig.add_subplot(111,projection=ccrs.Orthographic())#central_longitude=-80))
-    #     ax.gridlines()
-        im = ax.imshow(gewexMap_ctp[:,::-1], extent = gewexExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
-    #     ax.imshow(g_ctp_ocaLL, origin='lower', extent = (maxLon, minLon, maxLat, minLat), transform=ccrs.PlateCarree())#, alpha=0.5)
-        ax.coastlines(resolution='110m')#, color='r')
-        ax.set_title('GEWEX, %d-%02d' %(year, mon) + title_extra)
-        cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
-        cbar.set_label('Cloud Top Pressure [hPa]')
-        figname = '%s/map_ctp_gewex_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
-        fig.savefig(figname +'.png')
-        print(figname)
+        #: Gewex is not available for all months
+        if not np.isnan(gewexMap_ctp).all():
+            plt.figure(figsize=(3, 3))
+            fig = plt.figure()
+            ax = fig.add_subplot(111,projection=ccrs.Orthographic())#central_longitude=-80))
+        #     ax.gridlines()
+            im = ax.imshow(gewexMap_ctp, origin='lower', extent = gewexExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
+        #     ax.imshow(g_ctp_ocaLL, origin='lower', extent = (maxLon, minLon, maxLat, minLat), transform=ccrs.PlateCarree())#, alpha=0.5)
+            ax.coastlines(resolution='110m')#, color='r')
+            ax.set_title('GEWEX, %d-%02d' %(year, mon) + title_extra)
+            cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
+            cbar.set_label('Cloud Top Pressure [hPa]')
+            figname = '%s/map_ctp_gewex_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+            fig.savefig(figname +'.png')
+            print(figname)
         
-        #: CFC
         
         
 #         plt.figure(figsize=(3, 3))
@@ -843,12 +972,13 @@ if __name__ == '__main__':
 #         print(figname)
         
         
+        #: CFC
         
         plt.figure(figsize=(3, 3))
         fig = plt.figure()
         ax = fig.add_subplot(111,projection=ccrs.Orthographic())
     #     ax.gridlines()
-        im = ax.imshow(ocaMap_cfc[:,::-1], extent = ocaExtent, vmin=0, vmax=100, transform=ccrs.PlateCarree())#, alpha=0.5)
+        im = ax.imshow(ocaMap_cfc, origin='lower', extent = ocaExtent, vmin=0, vmax=100, transform=ccrs.PlateCarree())#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
         ax.set_title('OCA, %d-%02d' %(year, mon) + title_extra)
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
@@ -861,7 +991,7 @@ if __name__ == '__main__':
         fig = plt.figure()
         ax = fig.add_subplot(111,projection=ccrs.Orthographic())
     #     ax.gridlines()
-        im = ax.imshow(claasMap_cfc[:,::-1], extent = claasExtent, transform=ccrs.PlateCarree(), vmin=0, vmax=100)#, alpha=0.5)
+        im = ax.imshow(claasMap_cfc, origin='lower', extent = claasExtent, transform=ccrs.PlateCarree(), vmin=0, vmax=100)#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
         ax.set_title('CLAAS, %d-%02d' %(year, mon) + title_extra)
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
@@ -870,26 +1000,27 @@ if __name__ == '__main__':
         fig.savefig(figname +'.png')
         print(figname)
         
-        plt.figure(figsize=(3, 3))
-        fig = plt.figure()
-        ax = fig.add_subplot(111,projection=ccrs.Orthographic())#central_longitude=-80))
-    #     ax.gridlines()
-        im = ax.imshow(gewexMap_cfc[:,::-1], extent = gewexExtent, transform=ccrs.PlateCarree(), vmin=0, vmax=100)#, alpha=0.5)
-    #     ax.imshow(g_ctp_ocaLL, origin='lower', extent = (maxLon, minLon, maxLat, minLat), transform=ccrs.PlateCarree())#, alpha=0.5)
-        ax.coastlines(resolution='110m')#, color='r')
-        ax.set_title('GEWEX, %d-%02d' %(year, mon) + title_extra)
-        cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
-        cbar.set_label('Cloud Fraction [%]')
-        figname = '%s/map_cfc_gewex_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
-        fig.savefig(figname +'.png')    
-        print(figname)
+        #: Gewex is not available for all months
+        if not np.isnan(gewexMap_cfc).all():
+            plt.figure(figsize=(3, 3))
+            fig = plt.figure()
+            ax = fig.add_subplot(111,projection=ccrs.Orthographic())#central_longitude=-80))
+        #     ax.gridlines()
+            im = ax.imshow(gewexMap_cfc, origin='lower', extent = gewexExtent, transform=ccrs.PlateCarree(), vmin=0, vmax=100)#, alpha=0.5)
+        #     ax.imshow(g_ctp_ocaLL, origin='lower', extent = (maxLon, minLon, maxLat, minLat), transform=ccrs.PlateCarree())#, alpha=0.5)
+            ax.coastlines(resolution='110m')#, color='r')
+            ax.set_title('GEWEX, %d-%02d' %(year, mon) + title_extra)
+            cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
+            cbar.set_label('Cloud Fraction [%]')
+            figname = '%s/map_cfc_gewex_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+            fig.savefig(figname +'.png')    
+            print(figname)
 
 
 
 
 
     
-    pdb.set_trace()
     
     
     

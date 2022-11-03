@@ -95,14 +95,17 @@ def compareOCAListname(fn, flist):
     return same, i
                     
 
-def getMeanOca(od, ys, ms, cm=False, lt=True):
+def getMeanOca(od, ys, ms, tid=-1, cm=False, lt=True):
     #: od = dir
     #: ys = year
     #: ms = month
     #: cm = create monthly mean
     #: lt = load temp files
-
+    
+    
     tempname = os.path.join('TempFiles', 'OCAMean', 'oca_monthly-mean_%d-%02d.h5' %(ys, ms))
+    if tid >= 0:
+        tempname = tempname.replace('.h5', '_t-%02d.h5' %tid)
     corruptFiles = []
     #===========================================================================
     # #: Calc num of satellites and num of files
@@ -178,6 +181,23 @@ def getMeanOca(od, ys, ms, cm=False, lt=True):
                                 monthNames.append(fx)
                     
         monthNames.sort()
+        #: Remove files not used in time
+        monthNames_tid = []
+        if tid >= 0:
+            #===================================================================
+            # ncf = nc.Dataset('/home/foua/data_links/data/cloud_products/CLAAS-3/L3/cfc/2010/01/CFCmd20100101000000419SVMSG01MA.nc')
+            # claas_time_bnds = (ncf.variables['time_bnds'][:] - ncf.variables['time_bnds'][:][0,0]) * 24
+            # ncf.close()
+            #===================================================================
+            #: Def from claas, see above
+            tb_min = tid
+            tb_max = tid + 1
+            for fn in monthNames:
+                oca_hour = int(os.path.basename(fn).split('_')[4][8:10])
+                if (oca_hour >= tb_min) and (oca_hour < tb_max):
+                    monthNames_tid.append(fn)
+            monthNames = monthNames_tid
+        
         n_files = len(monthNames)
         if n_files == 0:
             print('No OCA Files')
@@ -457,6 +477,8 @@ if __name__ == '__main__':
                         help="Month. Default=0")
     parser.add_argument("-o","--om", action="store_true", default=False, 
                         help="Create monthly mean of OCA")
+    parser.add_argument("-t","--tid", type=int, default=-1,  
+                        help="Hour of day. Default=-1 i.e. the whole day")
     
     
     args = parser.parse_args()
@@ -543,7 +565,9 @@ if __name__ == '__main__':
             
             #: Read data
             #: OCA
-            olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, args.om) #: Pa
+            olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, args.tid, args.om) #: Pa
+            if args.om:
+                continue
             #: Controle if the data existed for the particular month
             if (not isinstance(olat, np.ndarray)) and np.isnan(olat):
                 no_oca_data = True
@@ -619,7 +643,6 @@ if __name__ == '__main__':
                     clas_ind_latlon = np.ones(lonremap_mesh.shape).astype('bool')
             else:
                 #: TODO: Right order?Update. I think it is
-                #: It wasent I think
                 clon_mesh, clat_mesh = np.meshgrid(ctolon, ctolat)
                 cctp = ctp_var[0][0]
                 ccfc = cfc_var[0][0]
@@ -766,6 +789,8 @@ if __name__ == '__main__':
 #     octp_use = []
 #     cctp_use = []
 #     for i in range(olon.shape[0]-1):
+    if args.om:
+        sys.exit()
     oca_ctp_plot = oca_ctp[0:i+1]
     clas_ctp_plot = clas_ctp[0:i+1]
     gewex_ctp_plot = gewex_ctp[0:i+1]

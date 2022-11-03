@@ -145,6 +145,7 @@ if __name__ == '__main__':
     mainClaraA3Dir = '/nobackup/smhid15/sm_kgkar/CLARA_A3_feedbackloop'
     mainClaraA2Dir = '/nobackup/smhid11/foua/data/CLARA-A2_final'
     mainClaraA21Dir = '/nobackup/smhid11/foua/data/CLARA-A2.1'
+    mainCalipsoDir = '/nobackup/smhid17/proj/foua/data/satellit/calipso/Cloud_Occurrence_V1'
     
     plotDir = '/nobackup/smhid17/users/sm_erjoh/Cmsaf/Plots/Compare_A3_A2'
     
@@ -154,47 +155,77 @@ if __name__ == '__main__':
                   201001, 201007, 201101, 201107, 201601, 201607]
     
     #: 'CFCmm', 'CTOmm', 'CPHmm', 'LWPmm', 'IWPmm', 'JCHmh'
-    typ = 'JCHmh'
+    typ = 'CFCmm'
     var = typ[0:3].lower()
     if var == 'cto':
         var = 'cth'
+    fv = getFigVar(var)
     for area in ['GL', 'NP', 'SP']:
         cfc3mean = []
         cfc2mean = []
-        ym_d = []
+        ym_d3 = []
+        ym_d2 = []
         for ym in yearmonths:
             year = int(str(ym)[0:4])
+#             if year != 2008:
+#                 continue
             mon = int(str(ym)[4:])
             if (area in ['NP', 'SP']) and (typ in ['CTOmm', 'CPHmm', 'LWPmm', 'IWPmm', 'JCHmh']):
                 continue
-            if (area in ['NP', 'SP']) and (year == 2016):
-                continue
-            if (var == 'jch') and (year == 2016):
-                continue
-            if year < 1982:
-                continue
+#             if (area in ['NP', 'SP']) and (year == 2016):
+#                 continue
+#             if (var == 'jch') and (year == 2016):
+#                 continue
+#             if year < 1982:
+#                 continue
             if year in [2016]:
                 c2d = '%s/*/AVPOS/%d' %(mainClaraA21Dir, year)
             else:
                 c2d = '%s/%d/%02d/nc/AVPOS_%d_GAC_V002_L3' %(mainClaraA2Dir, year, mon, ym)
             print(ym)
-            ym_d.append(datetime.datetime(year=year, month=mon, day=1))
             c3d = '%s/%d/AVPOS_%d_CLARA3_Level3_V011' %(mainClaraA3Dir, ym, ym)
-            
-            try:
-                fn3 = glob.glob('%s/%s%d*%s.nc' %(c3d, typ, ym, area))[0]
-                fn2 = glob.glob('%s/%s%d*%s.nc' %(c2d, typ, ym, area))[0]
-            except:
-                print('Cant find files')
+            fn3 = glob.glob('%s/%s%d*%s.nc' %(c3d, typ, ym, area))
+            fn2 = glob.glob('%s/%s%d*%s.nc' %(c2d, typ, ym, area))
+            if (len(fn3) + len(fn2)) == 0:
+                print('No files')
+                continue
+            if len(fn3) == 1:
+                nc3 = netCDF4.Dataset(fn3[0])
+                val3 = getVar(nc3, var, geo=True)
+                nc3.close()
+                ym_d3.append(datetime.datetime(year=year, month=mon, day=1))
+                if (area == 'GL') and (var in ['iwp', 'lwp']):
+                    lat3 = (np.abs(val3['lat']) <= 60)
+                    cfc3mean.append(np.nanmean(val3[var][0,lat3,:]))
+                else:
+                    cfc3mean.append(np.nanmean(val3[var]))
+            elif len(fn3) > 1:
+                print('To many a3 files')
                 pdb.set_trace()
-            nc3 = netCDF4.Dataset(fn3)
-            nc2 = netCDF4.Dataset(fn2)
-            val3 = getVar(nc3, var, geo=True)
-            val2 = getVar(nc2, var, geo=True)
-            nc3.close()
-            nc2.close()
-
-            if (ym in [198301, 201107]):
+            if len(fn2) == 1:
+                nc2 = netCDF4.Dataset(fn2[0])
+                val2 = getVar(nc2, var, geo=True)
+                nc2.close()
+                ym_d2.append(datetime.datetime(year=year, month=mon, day=1))
+                if (area == 'GL') and (var in ['iwp', 'lwp']):
+                    lat2 = (np.abs(val2['lat']) <= 60)
+                    cfc2mean.append(np.nanmean(val2[var][0,lat2,:]))
+                else:
+                    cfc2mean.append(np.nanmean(val2[var]))
+            elif len(fn2) > 1:
+                print('To many a2 files')
+                pdb.set_trace()
+            
+            
+#             #: Calipso
+#             if year == 2008:
+#                 cald = '%s/%d/%02d' %(mainCalipsoDir, year, mon)
+#                 calf = glob.glob('%s/CAL_LID_L3_Cloud_Occurrence-Standard-V1-00.%d-%02dA.h5' %(cald, year, mon))[0]
+#                 import h5py
+#                 h5cal = h5py.File(calf, 'r')
+#             
+#                 pdb.set_trace()
+            if (ym in [198301, 201107]) or (year == 2008):
                 #: The data is in lon/lat therefore use PlateCarree?
                 img_proj = ccrs.PlateCarree()
                 if area == 'GL':
@@ -272,8 +303,6 @@ if __name__ == '__main__':
                 resultd.data[:,0:xshape//2][lon[:,0:xshape//2]>0] = np.nan
                 resultd.data[:,xshape//2:][lon[:,xshape//2:]<0] = np.nan
                 
-                fv = getFigVar(var)
-                
                 fig = plt.figure(figsize=fs)
                 fig.suptitle('%s %d-%02d' %(var.upper(), year, mon))
                 ax = fig.add_subplot(3,1,1, projection=crs)
@@ -303,28 +332,40 @@ if __name__ == '__main__':
                 fig.show()
                 pdb.set_trace()
                 fig.savefig(figname + '.png')
-                
 
-            cfc3mean.append(np.nanmean(val3[var]))
-            cfc2mean.append(np.nanmean(val2[var]))
         
         if len(cfc3mean) == 0:
             continue
         fig = plt.figure()
         ax = fig.add_subplot(1,1,1)
-        ax.plot(ym_d, cfc3mean, color=CB_colour_cycle['red'], label='A3')
-        ax.plot(ym_d, cfc2mean, color=CB_colour_cycle['blue'], label='A2')
-        proc = ((np.asarray(cfc3mean) - np.asarray(cfc2mean))/np.asarray(cfc2mean)) * 100
-        procmean = np.mean(proc)
+        ax.plot(ym_d3, cfc3mean, color=CB_colour_cycle['red'], label='A3')
+        ax.plot(ym_d2, cfc2mean, color=CB_colour_cycle['blue'], label='A2')
+        #: Check where both has value
+        d_3 = []
+        d_2 = []
+        for i3, val in enumerate(ym_d3):
+            if val in ym_d2:
+                i2 = np.where(np.asarray(ym_d2) == val)[0][0]
+                d_3.append(cfc3mean[i3])
+                d_2.append(cfc2mean[i2])
+        #: Calculate difference
+        d_u = np.asarray(d_3) - np.asarray(d_2)
+        d_um = np.mean(d_u)
+        d_p = (d_u / np.asarray(d_2)) * 100
+        d_pm = np.mean(d_p)
     #     for i, txt in enumerate(proc):
-    #         ax.annotate(txt, (cfc3Gmean[i], ym_d[i]))
-        ax.text(0.5, 0.9, 'Mean increase = %0.2f%%' %procmean, horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+#     #         ax.annotate(txt, (cfc3Gmean[i], ym_d[i]))
      
      
      
         fig.autofmt_xdate()
         ax.set_xlabel('Date')
-        ax.set_ylabel('%s Mean %s' %(area, var.upper()))
+        if var in ['iwp', 'lwp']:
+            ax.set_ylabel('%s Mean (lat $\pm$ 60) %s %s' %(area, var.upper(), fv['cbarlabelo']))
+            ax.text(0.5, 0.9, 'Mean increase = %0.3f%s, %0.1f%%' %(d_um, fv['cbarlabeld'].replace('[', '').replace(']', ''), d_pm), horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+        else:
+            ax.set_ylabel('%s Mean %s %s' %(area, var.upper(), fv['cbarlabelo']))
+            ax.text(0.5, 0.9, 'Mean increase = %0.1f%s, %0.1f%%' %(d_um, fv['cbarlabeld'].replace('[', '').replace(']', ''), d_pm), horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
         ax.legend()
         fig.tight_layout()
         figname = '%s/%s_%s_mean' %(plotDir, var, area)

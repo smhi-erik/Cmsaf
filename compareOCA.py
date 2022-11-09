@@ -151,8 +151,23 @@ def getMeanOca(od, ys, ms, tid=-1, cm=False, lt=True):
     #         h5f.create_dataset('Extra Files', data = reserve)
     #     h5f.close()
     #===========================================================================
-        
-    if (cm == True) or (lt == False) or (not os.path.isfile(tempname)):
+    
+    #: Controle for corrupt files. 
+    #: OSError is usually that it can not be open
+    #: KeyError data is missing
+    #: Only d this when creating new month files i.e. cm=True
+    important_variables = ['lat', 'lon', 'ctp_m', 'cprob_m', 'cfc', 'MSG Name', 'Number of Files', 'Corrupt Files', 'Extra Files']
+    if cm and os.path.isfile(tempname):
+        try:
+            h5f = h5py.File(tempname, 'r')
+            for iv in important_variables:
+                temp = h5f[iv]  # @UnusedVariable
+        except (OSError, KeyError):
+            os.remove(tempname)
+        else:
+            h5f.close()
+
+    if (lt == False) or (not os.path.isfile(tempname)):
         print('Calculate OCA monthly mean')
         #: Get file names
         if False:
@@ -290,6 +305,7 @@ def getMeanOca(od, ys, ms, tid=-1, cm=False, lt=True):
         print('Total OCA read time = %d min' %(int((tot_time + (toc - tic)) / 60.)))
         print('')
         print('Save Temp file')
+        print(tempname)
         tics = time.time()
         h5f = h5py.File(tempname, 'w')
         for arname, value in resDict.items():
@@ -458,8 +474,8 @@ if __name__ == '__main__':
     
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("-l","--lat-bound", type=int, default=91,  
-                        help="Latitude Boundary. Default=90")
+#     parser.add_argument("-l","--lat-bound", type=int, default=91,  
+#                         help="Latitude Boundary. Default=90")
 #     parser.add_argument("-c1","--clim-max", type=int, default=500, 
 #                         help="Max clim. Default=500")
 #     parser.add_argument("-fn","--method-name", type=str, default='All', 
@@ -476,6 +492,8 @@ if __name__ == '__main__':
     parser.add_argument("-m","--month", type=int, default=0,  
                         help="Month. Default=0")
     parser.add_argument("-o","--om", action="store_true", default=False, 
+                        help="Create monthly mean of OCA")
+    parser.add_argument("-l","--lt", action="store_false", default=True, 
                         help="Create monthly mean of OCA")
     parser.add_argument("-t","--tid", type=int, default=-1,  
                         help="Hour of day. Default=-1 i.e. the whole day")
@@ -544,7 +562,10 @@ if __name__ == '__main__':
             if ((year == 2019) and (mon > 8)) or (year > 2019):
                 break
             i = i + 1
-            print('%d-%02d' %(year, mon))
+            if args.tid == -1:
+                print('%d-%02d' %(year, mon))
+            else:
+                print('%d-%02d-t%02d' %(year, mon, args.tid))
             yearmonths.append('%d-%02d' %(year, mon))
             
             #: Labels used for plotting time series
@@ -565,7 +586,7 @@ if __name__ == '__main__':
             
             #: Read data
             #: OCA
-            olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, args.tid, args.om) #: Pa
+            olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, args.tid, args.om, args.lt) #: Pa
             if args.om:
                 continue
             #: Controle if the data existed for the particular month

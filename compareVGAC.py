@@ -25,10 +25,12 @@ from pyresample.kd_tree import get_sample_from_neighbour_info
 from warnings import filterwarnings
 import glob
 import datetime
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import time
 from scipy.stats import gaussian_kde
 import scipy
+import os
 filterwarnings(action='ignore', category=DeprecationWarning, message='`np.bool` is a deprecated alias')
 # filterwarnings(action='ignore', category=DeprecationWarning, message='tostring() is deprecated.')
 
@@ -134,33 +136,41 @@ def plotScatterHisto(x_flat, y_flat, stitle, satn, xylim, pt_int, pt_str, pt_loc
     ax.set_yticks(pt_int)
     
     xn = np.linspace(xylim[0], xylim[1], 100)
-    k2, m = np.ma.polyfit(x_flat, y_flat, 1)
-    ny_y2 = k2*xn + m
-    ax.plot(xn, ny_y2, 'g--', label = '%.4G*x%+.2f' %(k2, m))
+    k1, m1 = np.ma.polyfit(x_flat, y_flat, 1)
+    k2a, k2b, m2 = np.ma.polyfit(x_flat, y_flat, 2)
+    p1 = np.ma.polyfit(x_flat, y_flat, 1)
+    p2 = np.ma.polyfit(x_flat, y_flat, 2)
+    ny_y1 = k1*xn + m1
+    ny_y2 = k2a*np.square(xn)+k2b*xn + m2
+#     p2 = np.poly1d(np.ma.polyfit(x_flat, y_flat, 2))
+#     ny_y2 = p2(xn)
+    ax.plot(xn, xn, 'r--', lw=0.5, label = 'y=x')
+    ax.plot(xn, ny_y1, 'g', label = '%.4G*x%+.2f' %(k1, m1))
+    ax.plot(xn, ny_y2, 'b', label = '%.4G*x²+%.4G*x%+.2f' %(k2a, k2b, m2))
     rr = np.ma.corrcoef(x_flat, y_flat)
     
-#         ax.plot(xn, xn, 'r', label = '1*x')
     ax.text(1,0,'ccof = %.4f' %rr[0,1], horizontalalignment='right', transform=ax.transAxes)
-    ax.legend(loc=2)
+    ax.legend(loc=2, bbox_to_anchor=(0, 1.45))
     ax.set_aspect(1)
     
-    
     ax = fig.add_subplot(1,2,2)
-    H, xedges, yedges = np.histogram2d(x_flat, y_flat, bins=histd2_bins, range=[xylim, xylim])
+    #: Histogram2D can not handle masked arrays
+    inds = np.where(~(x_flat.mask | y_flat.mask))
+    H, xedges, yedges = np.histogram2d(x_flat[inds], y_flat[inds], bins=histd2_bins, range=[xylim, xylim])  # @UnusedVariable
     cmap = 'plasma'
-    im = ax.imshow(H.T, origin='lower', vmin=0, vmax=vmax, cmap=cmap)
+    im = ax.imshow(H.T, origin='lower', cmap=cmap, vmin=0, vmax=vmax)
     #: -1 since the lat one is included in contrast to range. -0.5 to get everything inside the plot
     xnH = np.linspace(0, histd2_bins-1, 100)
-    ny_y2H = k2*xnH + m
-    ny_y2H = np.where(ny_y2H >= 99.75, np.nan, ny_y2H)
+#     ny_y1H = k1*xnH + m1
+#     ny_y1H = np.where(ny_y1H >= 99.75, np.nan, ny_y1H)
+#     
+#     zi = (ny_y1 - xylim[0]) / (xylim[1] - xylim[0]) * 100
+#     zi = np.where(zi >= 99.75, np.nan, zi)
+#     ax.plot(xnH, zi, 'g--')
+#         ax.plot(xnH, ny_y1H, 'g--')
     
-    zi = (ny_y2 - xylim[0]) / (xylim[1] - xylim[0]) * 100
-    zi = np.where(zi >= 99.75, np.nan, zi)
-    ax.plot(xnH, zi, 'g--')
-#         ax.plot(xnH, ny_y2H, 'g--')
     
-    
-#         ax.plot(xnH, xnH, 'r')
+    ax.plot(xnH, xnH, 'r--', lw=0.5)
     ax.set_title('2D Histogram')
     ax.set_xticks(pt_loc)
     ax.set_xticklabels(pt_str)
@@ -170,9 +180,8 @@ def plotScatterHisto(x_flat, y_flat, stitle, satn, xylim, pt_int, pt_str, pt_loc
     pos2 = ax.get_position()
     cbar_ax = fig.add_axes([0.90, pos2.y0, 0.01, pos2.y1 - pos2.y0])
     cbar = fig.colorbar(im, cax=cbar_ax)
-#         fig.savefig(figname + '.png')
+    fig.savefig(figname + '.png')
     fig.show()
-    
 
 if __name__ == '__main__':
     mainDir = 'Data/testdata1_VGAC_CLARA35_corrected'
@@ -193,16 +202,15 @@ if __name__ == '__main__':
     accept_time_diff = 1 #: in minutes
     
     a = -1
-    for i in [1]:#range(len(n19_StartTimes)):
+    for i in range(len(n19_StartTimes)):
         a = a + 1
         n19f = glob.glob('%s/S_NWC_avhrr_noaa19_*%s*.nc' %(radianceDir, n19_StartTimes[i]))[0]
         vgacf = glob.glob('%s/S_NWC_avhrr_vgacsnpp_*%s*.nc' %(radianceDir, npp_StartTimes[i]))[0]
         viirsf = glob.glob('%s/S_NWC_viirs_npp_*%s*.nc' %(radianceDir, npp_StartTimes[i]))[0]
-        
+
         n19 = netCDF4.Dataset(n19f, 'r', format='NETCDF4')
         vgac = netCDF4.Dataset(vgacf, 'r', format='NETCDF4')
         viirs = netCDF4.Dataset(viirsf, 'r', format='NETCDF4')
-        
         
 #     ct = pps_nc1['cma'][:]
 #         if accept_satz_max == 180:
@@ -234,7 +242,7 @@ if __name__ == '__main__':
         n19_tb11 = getChannel(n19, 'ch_tb11', n19_masked)
         n19_tb12 = getChannel(n19, 'ch_tb12', n19_masked)
         n19_tb37 = getChannel(n19, 'ch_tb37', n19_masked)
-        
+
         vgac_lats =  vgac['lat'][:]
         vgac_lons =  vgac['lon'][:]
         vgac_r06 = getChannel(vgac, 'ch_r06', vgac_masked)
@@ -243,7 +251,7 @@ if __name__ == '__main__':
         vgac_tb11 = getChannel(vgac, 'ch_tb11', vgac_masked)
         vgac_tb12 = getChannel(vgac, 'ch_tb12', vgac_masked)
         vgac_tb37 = getChannel(vgac, 'ch_tb37', vgac_masked)
-        
+
         viirs_lats =  viirs['lat'][:]
         viirs_lons =  viirs['lon'][:]
         viirs_r06 = getChannel(viirs, 'ch_r06', viirs_masked)
@@ -252,7 +260,7 @@ if __name__ == '__main__':
         viirs_tb11 = getChannel(viirs, 'ch_tb11', viirs_masked)
         viirs_tb12 = getChannel(viirs, 'ch_tb12', viirs_masked)
         viirs_tb37 = getChannel(viirs, 'ch_tb37', viirs_masked)
-        
+
         n19_scanLineTime = getTimePerScanline(n19, n19_StartTimes[i])
         npp_scanLineTime = getTimePerScanline(vgac, npp_StartTimes[i])
         
@@ -263,26 +271,41 @@ if __name__ == '__main__':
         vgac.close()
         viirs.close()
         
-        if False:#i == 1:
+        if i == 1:
+            myFmt = mdates.DateFormatter('%H:%M')
             fig = plt.figure()
-            ax = fig.add_subplot(111)
-            ax.plot(npp_scanLineTime, vgac_lats[:, npp_center_scanline])
-            ax.plot(n19_scanLineTime, n19_lats[:, n19_center_scanline])
-            fig.show()
+            fig.suptitle('Noaa 19 = ' + os.path.basename(n19f).split('_')[-2].replace('Z', '') + '\n' + 'NPP = ' + os.path.basename(viirsf).split('_')[-2])
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.plot(npp_scanLineTime, vgac_lats[:, npp_center_scanline], label='NPP')
+            ax1.plot(n19_scanLineTime, n19_lats[:, n19_center_scanline], label='Noaa 19')
+#             ax1.set_xlim(datetime.datetime())
+            ax1.set_title('Org orbit')
+            ax1.set_ylabel('Latitude')
+            ax1.set_xlabel('Time')
+            ax1.xaxis.set_major_formatter(myFmt)
+            ax1.legend()
+            
         n19_use, npp_use = findEdges(n19_lats[:, n19_center_scanline], n19_lons[:, n19_center_scanline], n19_scanLineTime, vgac_lats[:, npp_center_scanline], vgac_lons[:, npp_center_scanline], npp_scanLineTime, accept_time_diff)
         
         n19_lats, n19_lons, n19_r06, n19_r09, n19_r16, n19_tb11, n19_tb12, n19_tb37 = cutEdges([n19_lats, n19_lons, n19_r06, n19_r09, n19_r16, n19_tb11, n19_tb12, n19_tb37], n19_use)
         vgac_lats, vgac_lons, vgac_r06, vgac_r09, vgac_r16, vgac_tb11, vgac_tb12, vgac_tb37 = cutEdges([vgac_lats, vgac_lons, vgac_r06, vgac_r09, vgac_r16, vgac_tb11, vgac_tb12, vgac_tb37], npp_use)
         viirs_lats, viirs_lons, viirs_r06, viirs_r09, viirs_r16, viirs_tb11, viirs_tb12, viirs_tb37 = cutEdges([viirs_lats, viirs_lons, viirs_r06, viirs_r09, viirs_r16, viirs_tb11, viirs_tb12, viirs_tb37], npp_use)
         
-        if False:#i == 1:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-            ax.plot(npp_scanLineTime[npp_use], vgac_lats[:, int(vgac_lats.shape[1]/2) + 1])
-            ax.plot(n19_scanLineTime[n19_use], n19_lats[:, int(n19_lats.shape[1]/2) + 1])
+        if i == 1:
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.plot(npp_scanLineTime[npp_use], vgac_lats[:, int(vgac_lats.shape[1]/2) + 1], label='NPP')
+            ax2.plot(n19_scanLineTime[n19_use], n19_lats[:, int(n19_lats.shape[1]/2) + 1], label='Noaa 19')
+            ax2.set_title('1 min diff orbit')
+            ax2.set_xlabel('Time')
+            ax2.xaxis.set_major_formatter(myFmt)
+            
+            fig.autofmt_xdate()
+            fig.tight_layout()
+            figname = '%s/orbit_compare' %(plotDir)
+            print(figname)
+            fig.savefig(figname + 'png')
             fig.show()
-        
-        
+            
     
 #     n19.close()
 #     vgac.close()
@@ -353,7 +376,7 @@ if __name__ == '__main__':
     r_max_axis = 180
     tb_min_axis = 170
     tb_max_axis = 350
-    vmax = 100
+    vmax = 5000
     
     r_plot_ticks_int = [*range(0, r_max_axis+1, 30)]
     r_plot_ticks_str = np.asarray(r_plot_ticks_int).astype(str).tolist()
@@ -447,12 +470,12 @@ if __name__ == '__main__':
     
     
     #: VGAC
-    figname = '%s/%s_n19_vgac_r06_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_r06_all_flat, vgac_r06_all_flat, 'r06%s' %title_end, 'VGAC', [0, r_max_axis], \
+    figname = '%s/%s_n19_vgac_r06_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_r06_all_flat, vgac_r06_all_flat, 'Channel 1 (r06)%s' %title_end, 'VGAC', [0, r_max_axis], \
                      r_plot_ticks_int, r_plot_ticks_str, r_plot_ticks_loc, histd2_bins, vmax, figname)
     #:VIIRS
-    figname = '%s/%s_n19_viirs_r06_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_r06_all_flat, viirs_r06_all_flat, 'r06%s' %title_end, 'VIIRS', [0, r_max_axis], \
+    figname = '%s/%s_n19_viirs_r06_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_r06_all_flat, viirs_r06_all_flat, 'Channel 1 (r06)%s' %title_end, 'VIIRS', [0, r_max_axis], \
                      r_plot_ticks_int, r_plot_ticks_str, r_plot_ticks_loc, histd2_bins, vmax, figname)
     
     #: Channel r09
@@ -460,13 +483,13 @@ if __name__ == '__main__':
     vgac_r09_all_flat = vgac_r09_all.flatten()
     viirs_r09_all_flat = viirs_r09_all.flatten()
     #: VGAC
-    figname = '%s/%s_n19_vgac_r09_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_r09_all_flat, vgac_r09_all_flat, 'r09%s' %title_end, 'VGAC', [0, r_max_axis], \
+    figname = '%s/%s_n19_vgac_r09_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_r09_all_flat, vgac_r09_all_flat, 'Channel 2 (r09)%s' %title_end, 'VGAC', [0, r_max_axis], \
                      r_plot_ticks_int, r_plot_ticks_str, r_plot_ticks_loc, histd2_bins, vmax, figname)
 
     #: VIIRS
-    figname = '%s/%s_n19_viirs_r09_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_r09_all_flat, viirs_r09_all_flat, 'r09%s' %title_end, 'VIIRS', [0, r_max_axis], \
+    figname = '%s/%s_n19_viirs_r09_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_r09_all_flat, viirs_r09_all_flat, 'Channel 2 (r09)%s' %title_end, 'VIIRS', [0, r_max_axis], \
                      r_plot_ticks_int, r_plot_ticks_str, r_plot_ticks_loc, histd2_bins, vmax, figname)
     
     #: Channel tb11
@@ -492,12 +515,12 @@ if __name__ == '__main__':
 #         cc=None
 #         ss=None
     #: VGAC
-    figname = '%s/%s_n19_vgac_tb11_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff) 
-    plotScatterHisto(rm_n19_tb11_all_flat, vgac_tb11_all_flat, 'tb11%s' %title_end, 'VGAC', [tb_min_axis, tb_max_axis], \
+    figname = '%s/%s_n19_vgac_tb11_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_tb11_all_flat, vgac_tb11_all_flat, 'Channel 4 (tb11)%s' %title_end, 'VGAC', [tb_min_axis, tb_max_axis], \
                      tb_plot_ticks_int, tb_plot_ticks_str, tb_plot_ticks_loc, histd2_bins, vmax, figname)
     #: VIIRS
-    figname = '%s/%s_n19_viirs_tb11_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_tb11_all_flat, viirs_tb11_all_flat, 'tb11%s' %title_end, 'VIIRS', [tb_min_axis, tb_max_axis], \
+    figname = '%s/%s_n19_viirs_tb11_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_tb11_all_flat, viirs_tb11_all_flat, 'Channel 4 (tb11)%s' %title_end, 'VIIRS', [tb_min_axis, tb_max_axis], \
                      tb_plot_ticks_int, tb_plot_ticks_str, tb_plot_ticks_loc, histd2_bins, vmax, figname)
     
     #: Channel tb12
@@ -506,12 +529,12 @@ if __name__ == '__main__':
     viirs_tb12_all_flat = viirs_tb12_all.flatten()
     #: VGAC
     
-    figname = '%s/%s_n19_vgac_tb12_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_tb12_all_flat, vgac_tb12_all_flat, 'tb12%s' %title_end, 'VGAC', [tb_min_axis, tb_max_axis], \
+    figname = '%s/%s_n19_vgac_tb12_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_tb12_all_flat, vgac_tb12_all_flat, 'Channel 5 (tb12)%s' %title_end, 'VGAC', [tb_min_axis, tb_max_axis], \
                      tb_plot_ticks_int, tb_plot_ticks_str, tb_plot_ticks_loc, histd2_bins, vmax, figname)
     #: VIIRS
-    figname = '%s/%s_n19_viirs_tb12_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_tb12_all_flat, viirs_tb12_all_flat, 'tb12%s' %title_end, 'VIIRS', [tb_min_axis, tb_max_axis], \
+    figname = '%s/%s_n19_viirs_tb12_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_tb12_all_flat, viirs_tb12_all_flat, 'Channel 5 (tb12)%s' %title_end, 'VIIRS', [tb_min_axis, tb_max_axis], \
                      tb_plot_ticks_int, tb_plot_ticks_str, tb_plot_ticks_loc, histd2_bins, vmax, figname)
 
     #: Channel tb37
@@ -519,13 +542,13 @@ if __name__ == '__main__':
     vgac_tb37_all_flat = vgac_tb37_all.flatten()
     viirs_tb37_all_flat = viirs_tb37_all.flatten()
     #: VGAC
-    figname = '%s/%s_n19_vgac_tb37_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff)
-    plotScatterHisto(rm_n19_tb37_all_flat, vgac_tb37_all_flat, 'tb37%s' %title_end, 'VGAC', [tb_min_axis, tb_max_axis], \
+    figname = '%s/%s_n19_vgac_tb37_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_tb37_all_flat, vgac_tb37_all_flat, 'Channel 3b (tb37)%s' %title_end, 'VGAC', [tb_min_axis, tb_max_axis], \
                      tb_plot_ticks_int, tb_plot_ticks_str, tb_plot_ticks_loc, histd2_bins, vmax, figname)
     
     #: VIIRS
-    figname = '%s/%s_n19_viirs_tb37_satz-%d_sunz-%d_td-%dmin' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff) 
-    plotScatterHisto(rm_n19_tb37_all_flat, viirs_tb37_all_flat, 'tb37%s' %title_end, 'VIIRS', [tb_min_axis, tb_max_axis], \
+    figname = '%s/%s_n19_viirs_tb37_satz-%d_sunz-%d_td-%dmin_vmax-%d' %(plotDir, plotType, accept_satz_max, accept_sunz_max, accept_time_diff, vmax)
+    plotScatterHisto(rm_n19_tb37_all_flat, viirs_tb37_all_flat, 'Channel 3b (tb37)%s' %title_end, 'VIIRS', [tb_min_axis, tb_max_axis], \
                      tb_plot_ticks_int, tb_plot_ticks_str, tb_plot_ticks_loc, histd2_bins, vmax, figname)
     
     

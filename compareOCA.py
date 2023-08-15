@@ -155,7 +155,7 @@ def getMeanOca(od, ys, ms, tid=-1, cm=False, lt=True):
     #: Controle for corrupt files. 
     #: OSError is usually that it can not be open
     #: KeyError data is missing
-    #: Only d this when creating new month files i.e. cm=True
+    #: Only do this when creating new month files i.e. cm=True
     important_variables = ['lat', 'lon', 'ctp_m', 'cprob_m', 'cfc', 'MSG Name', 'Number of Files', 'Corrupt Files', 'Extra Files']
     if cm and os.path.isfile(tempname):
         try:
@@ -369,7 +369,21 @@ def readOCA(fname):
     return lat, lon, sc, ctp, cprob
 
 
-def readClas(fname, typ='cfc'):
+def getClaas(fname, typ, dn):
+    lat, lon, ctime, cfc_var, lat_b, lon_b, time_b = readClaas(fname, typ)  # @UnusedVariable
+    if dn == 'd':
+        tind = np.argmin(np.abs(((ctime - ctime[0]) * 24) - 13))
+    elif dn == 'n':
+        tind = np.argmin(np.abs(((ctime - ctime[0]) * 24) - 1))
+    else:
+        tind = 0
+    retv = []
+    for t in cfc_var:
+        retv.append(t[tind, :, :])
+    return lat, lon, ctime, retv
+
+
+def readClaas(fname, typ='cfc'):
     ncf = nc.Dataset(fname)
     lat = ncf.variables['lat'][:].data.astype(np.float64)
     if ncf.variables['lat'][:].mask.ndim != 0:
@@ -392,12 +406,16 @@ def readClas(fname, typ='cfc'):
     if ncf.variables['time_bnds'][:].mask.ndim != 0:
         time_b[ncf.variables['time_bnds'][:].mask] = np.nan
     
+    if os.path.basename(fname)[3:5] == 'md':
+        var_extent = '_mmdc'
+    else:
+        var_extent = ''
     vara = []
     if typ == 'cfc':
-        vara.append(ncf.variables['cfc'])
-        vara.append(ncf.variables['cma_prob'])
+        vara.append(ncf.variables['cfc%s' %var_extent])
+        vara.append(ncf.variables['cma_prob%s' %var_extent])
     elif typ == 'cto':
-        vara.append(ncf.variables['ctp'])
+        vara.append(ncf.variables['ctp%s' %var_extent])
     var = []
     for v in vara:
         dat = v[:].data.astype(np.float64)
@@ -484,7 +502,8 @@ if __name__ == '__main__':
 #                         help="Do not show figure. Default=True (i.e. show figure)")
     parser.add_argument("-s","--show", action="store_false", default=True, 
                         help="Do not show figure. Default=True (i.e. show figure)")
-    
+    parser.add_argument("-d","--dn", type=str, default='a',  
+                        help="day(d) / night(n) / all(a). Default=a")
     parser.add_argument("-u","--useOpt", type=int, default=10,  
                         help="use option. Default=10")
     parser.add_argument("-y","--year", type=int, default=0,  
@@ -502,16 +521,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
     show = args.show
     use_opt = args.useOpt
+    #: d=day, n=night, a=all
+    dn = args.dn
     
-    
-    clasMainDir = '/home/foua/data_links/data/cloud_products/CLAAS-3/L3'
+    #: Some dirs
+    clasMainDir = '/home/foua/data_links/data/cloud_products/CLAAS-3/TCDR/L3'
     ocaMainDir_msg = '/home/foua/data_links/data/cloud_products/OCA/Release1'
-    
-    
-    
     gewexMainDir = '/nobackup/smhid19/proj/foua/data/satellite/calipso_monthly_mean_GEWEX/h5_converted'
     plotDir = 'Plots/Compare_OCA'
     tempfiles = '/TempFiles/OCAMean'
+    
     if args.year == 0:
         years = range(2004,2020)
     else:
@@ -521,7 +540,6 @@ if __name__ == '__main__':
     else:
         months = [args.month]
     day = 1
-    
     # cfc = cloud fraction
     # cph = cloud types  
     # cto = cloud top hPa
@@ -586,7 +604,13 @@ if __name__ == '__main__':
             
             #: Read data
             #: OCA
-            olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, args.tid, args.om, args.lt) #: Pa
+            if dn == 'd':
+                oca_tid = 13
+            elif dn == 'n':
+                oca_tid = 1
+            else:
+                oca_tid = args.tid
+            olat, olon, octp, ocprob_m, ocfc, oextra = getMeanOca(ocaMainDir_msg, year, mon, oca_tid, args.om, args.lt) #: Pa
             if args.om:
                 continue
             #: Controle if the data existed for the particular month
@@ -595,17 +619,21 @@ if __name__ == '__main__':
             else:
                 no_oca_data = False
             #: Clas
-            cfcClasname = glob.glob('%s/CFCmm*.nc' %cfcclasDir)[0] #: md = Diurnal cycle, mm = monthly mean
-            ctoClasname = glob.glob('%s/CTOmm*.nc' %ctoclasDir)[0] #: md = Diurnal cycle, mm = monthly mean, mh = ?
-            cfclat, cfclon, cfctime, cfc_var, cfclat_b, cfclon_b, cfctime_b = readClas(cfcClasname, 'cfc')
-            ctolat, ctolon, ctotime, ctp_var, ctolat_b, ctolon_b, ctotime_b = readClas(ctoClasname, 'cto') #: hPa
+            if dn in ['a']:
+                clasNameStart = 'mm'
+            else:
+                clasNameStart = 'md'
+            cfcClasname = glob.glob('%s/CFC%s*.nc' %(cfcclasDir, clasNameStart))[0] #: md = Diurnal cycle, mm = monthly mean
+            ctoClasname = glob.glob('%s/CTO%s*.nc' %(ctoclasDir, clasNameStart))[0] #: md = Diurnal cycle, mm = monthly mean, mh = ?
+            cfclat, cfclon, cfctime, cfc_var = getClaas(cfcClasname, 'cfc', dn)
+            ctolat, ctolon, ctotime, ctp_var = getClaas(ctoClasname, 'cto', dn) #: hPa
             #: Controle if the data existed for the particular month
             if np.all(ctp_var[0] == 0) or ((not isinstance(cfclat, np.ndarray)) and np.isnan(cfclat)):
                 no_clas_data = True
             else:
                 no_clas_data = False
             #: Gewax
-            gewexname = '%s/CAL_LID_L3_GEWEX_Cloud-Standard-V1-00.%i-%02dA.h5' %(gewexDir, year, mon)
+            gewexname = '%s/CAL_LID_L3_GEWEX_Cloud-Standard-V1-00.%i-%02d%s.h5' %(gewexDir, year, mon, dn.upper())
             glat, glon, gctp, gcft = readGewax(gewexname) #: hPa
             #: Controle if the data existed for the particular month
             if (not isinstance(glat, np.ndarray)) and np.isnan(glat):
@@ -665,16 +693,18 @@ if __name__ == '__main__':
             else:
                 #: TODO: Right order?Update. I think it is
                 clon_mesh, clat_mesh = np.meshgrid(ctolon, ctolat)
-                cctp = ctp_var[0][0]
-                ccfc = cfc_var[0][0]
+                cctp = ctp_var[0]
+                ccfc = cfc_var[0]
                 if use_opt in [12, 13, 22, 23]:
                     #: No remapp just pick every 20th, start 10 in
-                    cctp = cctp[10::20, 10::20]
-                    ccfc = ccfc[10::20, 10::20]
-                    ctolon = ctolon[10::20]
-                    ctolat = ctolat[10::20]
-                    clon_mesh = clon_mesh[10::20, 10::20]
-                    clat_mesh = clat_mesh[10::20, 10::20]
+                    step_ind = int(ccfc.shape[0] / 180)
+                    start_ind = int(step_ind / 2)
+                    cctp = cctp[start_ind::step_ind, start_ind::step_ind]
+                    ccfc = ccfc[start_ind::step_ind, start_ind::step_ind]
+                    ctolon = ctolon[start_ind::step_ind]
+                    ctolat = ctolat[start_ind::step_ind]
+                    clon_mesh = clon_mesh[start_ind::step_ind, start_ind::step_ind]
+                    clat_mesh = clat_mesh[start_ind::step_ind, start_ind::step_ind]
                     
                     #: Needs to be same extent
                     ctolon = addExtent(ctolon, 'lon', lonremap, lonremap_mesh)
@@ -705,8 +735,7 @@ if __name__ == '__main__':
             
             
             #: Create Inds
-            
-            if [12, 13, 22, 23]:
+            if use_opt in [12, 13, 22, 23]:
                 true_cfc = oca_true_cfc & clas_true_cfc & gewex_true_cfc
                 true_ctp = oca_true_ctp & clas_true_ctp & gewex_true_ctp
                 ind_latlon = oca_ind_latlon & clas_ind_latlon & gewex_ind_latlon
@@ -801,6 +830,13 @@ if __name__ == '__main__':
                     gewexMap_ctp = np.where(gewexIndctp, gctp, np.nan)
                     gewexMap_cfc = np.where(gewexIndcfc, gcfc, np.nan)
                     gewexExtent = (np.nanmin(glon), np.nanmax(glon), np.nanmin(glat), np.nanmax(glat))
+                
+                figend_maps = '%d-%02d' %(year, mon)
+                if dn != 'a':
+                    figend_maps = figend_maps + '_%s' %dn
+                figend_maps = figend_maps + '_opt-%d' %use_opt
+                title_maps_time = '%d-%02d' %(year, mon)
+                
                 plotMaps_done = True
 #     class cartopy.crs.Orthographic(central_longitude=0.0, central_latitude=0.0, globe=None)[source]
 # 
@@ -824,9 +860,12 @@ if __name__ == '__main__':
         figend = ''
     else:
         figend = '-%s' %year
+    if dn != 'a':
+        figend = figend + '_%s' %dn
     figend = figend + '_opt-%d' %use_opt
+    
+    #: Titles for Develop
     title_extra = '\n Area = +-%d' %(int(maxLon))
-
     if use_opt in [10, 20, 12, 22]:
         title_extra = title_extra + ', cos(lat) = False'
     elif use_opt in [11, 21, 13, 23]:
@@ -836,9 +875,15 @@ if __name__ == '__main__':
     elif use_opt in [12, 13, 22, 23]:
         title_extra = title_extra + ', Resample = True'
     
+    #: Nicer titles for presentation
     if use_opt in [12, 22]:
         title_extra = '\n Area = +-%d, Resample = True' %(int(np.nanmax(olon[ocaIndctp]) + 0.5))
-        
+    #: Add day night. Do it after to add to both nicer and develop
+    if dn == 'n':
+        title_extra = ', Night' + title_extra
+    elif dn == 'd':
+        title_extra = ', Day' + title_extra
+    
     #: Only plot time series if there are enough months
     if len(months) >= 12:
         #: To make sure label for OCA is only used once
@@ -892,7 +937,9 @@ if __name__ == '__main__':
         ax.set_ylabel('Cloud Top Pressure [hPa]')
         ax.set_ylim([700, 400])
         ax.legend(fontsize=8, bbox_to_anchor=(1.02, 1))
-        ax.set_title('Monthly Mean Cloud Top Pressure' + title_extra)
+        title = 'Monthly Mean Cloud Top Pressure %s \n Mean: Claas = %d, Gewex = %d, OCA = %d' \
+                %(title_extra, int(np.nanmean(clas_ctp_plot)), int(np.nanmean(gewex_ctp_plot)), int(np.nanmean(oca_ctp_plot)))
+        ax.set_title(title)
         fig.autofmt_xdate()
         plt.tight_layout()
         figname = '%s/ctp_month-mean%s' %(plotDir, figend)
@@ -929,8 +976,10 @@ if __name__ == '__main__':
         ax.set_ylabel('Cloud Fraction [%]')
         ax.set_ylim([45, 75])
         ax.legend(fontsize=8, bbox_to_anchor=(1.02, 1))
-    
-        ax.set_title('Monthly Mean Cloud Fraction' + title_extra)
+        title = 'Monthly Mean Cloud Fraction %s \n Mean: Claas = %d, Gewex = %d, OCA = %d' \
+                %(title_extra, int(np.nanmean(clas_cfc_plot)), int(np.nanmean(gewex_cfc_plot)), int(np.nanmean(oca_cfc_plot)))
+        ax.set_title(title)
+#         ax.set_title('Monthly Mean Cloud Fraction' + title_extra)
         fig.autofmt_xdate()
         plt.tight_layout()
         figname = '%s/cfc_month-mean%s' %(plotDir, figend)
@@ -966,10 +1015,10 @@ if __name__ == '__main__':
         im = ax.imshow(ocaMap_ctp, origin='lower', extent = ocaExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
 #         im = ax.imshow(ocaMap_ctp, origin ='lower', extent = ocaExtent, transform=oca_proj, vmin=100, vmax=1000)#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
-        ax.set_title('OCA, %d-%02d' %(year, mon) + title_extra)
+        ax.set_title('OCA, %s%s' %(title_maps_time, title_extra))
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
         cbar.set_label('Cloud Top Pressure [hPa]')
-        figname = '%s/map_ctp_oca_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+        figname = '%s/map_ctp_oca_month-mean-%s' %(plotDir, figend_maps)
         fig.savefig(figname +'.png')
         print(figname)
         
@@ -979,10 +1028,10 @@ if __name__ == '__main__':
     #     ax.gridlines()
         im = ax.imshow(claasMap_ctp, origin='lower', extent = claasExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
-        ax.set_title('CLAAS, %d-%02d' %(year, mon) + title_extra)
+        ax.set_title('CLAAS, %s%s' %(title_maps_time, title_extra))
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
         cbar.set_label('Cloud Top Pressure [hPa]')
-        figname = '%s/map_ctp_claas_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+        figname = '%s/map_ctp_claas_month-mean-%s' %(plotDir, figend_maps)
         fig.savefig(figname +'.png')
         print(figname)
         
@@ -995,10 +1044,10 @@ if __name__ == '__main__':
             im = ax.imshow(gewexMap_ctp, origin='lower', extent = gewexExtent, transform=ccrs.PlateCarree(), vmin=100, vmax=1000)#, alpha=0.5)
         #     ax.imshow(g_ctp_ocaLL, origin='lower', extent = (maxLon, minLon, maxLat, minLat), transform=ccrs.PlateCarree())#, alpha=0.5)
             ax.coastlines(resolution='110m')#, color='r')
-            ax.set_title('GEWEX, %d-%02d' %(year, mon) + title_extra)
+            ax.set_title('GEWEX, %s%s' %(title_maps_time, title_extra))
             cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
             cbar.set_label('Cloud Top Pressure [hPa]')
-            figname = '%s/map_ctp_gewex_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+            figname = '%s/map_ctp_gewex_month-mean-%s' %(plotDir, figend_maps)
             fig.savefig(figname +'.png')
             print(figname)
         
@@ -1026,10 +1075,10 @@ if __name__ == '__main__':
     #     ax.gridlines()
         im = ax.imshow(ocaMap_cfc, origin='lower', extent = ocaExtent, vmin=0, vmax=100, transform=ccrs.PlateCarree())#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
-        ax.set_title('OCA, %d-%02d' %(year, mon) + title_extra)
+        ax.set_title('OCA, %s%s' %(title_maps_time, title_extra))
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
         cbar.set_label('Cloud Fraction [%]')
-        figname = '%s/map_cfc_oca_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+        figname = '%s/map_cfc_oca_month-mean-%s' %(plotDir, figend_maps)
         fig.savefig(figname +'.png')
         print(figname)
         
@@ -1039,10 +1088,10 @@ if __name__ == '__main__':
     #     ax.gridlines()
         im = ax.imshow(claasMap_cfc, origin='lower', extent = claasExtent, transform=ccrs.PlateCarree(), vmin=0, vmax=100)#, alpha=0.5)
         ax.coastlines(resolution='110m')#, color='r')
-        ax.set_title('CLAAS, %d-%02d' %(year, mon) + title_extra)
+        ax.set_title('CLAAS, %s%s' %(title_maps_time, title_extra))
         cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
         cbar.set_label('Cloud Fraction [%]')
-        figname = '%s/map_cfc_claas_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+        figname = '%s/map_cfc_claas_month-mean-%s' %(plotDir, figend_maps)
         fig.savefig(figname +'.png')
         print(figname)
         
@@ -1055,10 +1104,10 @@ if __name__ == '__main__':
             im = ax.imshow(gewexMap_cfc, origin='lower', extent = gewexExtent, transform=ccrs.PlateCarree(), vmin=0, vmax=100)#, alpha=0.5)
         #     ax.imshow(g_ctp_ocaLL, origin='lower', extent = (maxLon, minLon, maxLat, minLat), transform=ccrs.PlateCarree())#, alpha=0.5)
             ax.coastlines(resolution='110m')#, color='r')
-            ax.set_title('GEWEX, %d-%02d' %(year, mon) + title_extra)
+            ax.set_title('GEWEX, %s%s' %(title_maps_time, title_extra))
             cbar = fig.colorbar(im)#, orientation='horizontal', cax=cbar_ax, ticks=barticks)
             cbar.set_label('Cloud Fraction [%]')
-            figname = '%s/map_cfc_gewex_month-mean-%d-%02d' %(plotDir, year, mon) + '_opt-%d' %use_opt
+            figname = '%s/map_cfc_gewex_month-mean-%s' %(plotDir, figend_maps)
             fig.savefig(figname +'.png')    
             print(figname)
 
